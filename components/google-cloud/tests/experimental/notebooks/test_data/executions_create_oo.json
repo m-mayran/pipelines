@@ -1,0 +1,13 @@
+{
+  "name": "projects/mock-project/locations/mock-location/operations/mock-operation-execution-create",
+  "metadata": {
+    "@type": "type.googleapis.com/google.cloud.notebooks.v1.OperationMetadata",
+    "createTime": "2001-01-01T01:01:01.100000000Z",
+    "target": "projects/mock-project/locations/mock-location/executions/mock-execution-id",
+    "verb": "create",
+    "requestedCancellation": false,
+    "apiVersion": "v1",
+    "endpoint": "CreateExecution"
+  },
+  "done": false
+}
