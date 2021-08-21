@@ -22,23 +22,22 @@ Uses the Notebooks Executor API:
 https://cloud.google.com/notebooks/docs/reference/rest#rest-resource:-v1.projects.locations.executions.
 """
 
-
+from googleapiclient import discovery
+from googleapiclient import errors
+from googleapiclient.http import set_user_agent
+import httplib2
 from kfp.components import create_component_from_func, InputPath, OutputPath
+from kfp.v2.dsl import component
+import time
+from types import SimpleNamespace
 from typing import NamedTuple, Optional  # pylint: disable=unused-import
 
 class NotebooksExecutor:
-  """Component logic for executing notebooks as a step.
+  """Component logic for executing notebooks as a step."""
 
-  TODO(mayran): Check whether we should use a class:
-  - Without gapic, we need a few functions to check operations, etc... Using a
-    class makes tests easier to write but the component does not have a concept
-    of what is outside the function so does not understand `NotebooksExecutor.`
-  - Are there any other option than using `create_component_from_func` for more
-    complex components?
-  """
-
-  @staticmethod
+  @classmethod
   def execute_notebook(
+    cls,
     project_id: str,
     input_notebook_file: str,
     output_notebook_folder: str,
@@ -78,37 +77,36 @@ class NotebooksExecutor:
     Raises
       RuntimeError with the error message.
     """
-
-    from googleapiclient import discovery
-    from googleapiclient import errors
-    from googleapiclient.http import set_user_agent
-    import httplib2
-    import time
-    from types import SimpleNamespace
-    from typing import NamedTuple, Optional  # pylint: disable=unused-import
+    cls._init_clients()
 
     # ------------------------------------------------
     # Sets input and outputs for the execution.
     # ------------------------------------------------
+
+    project_id = kwargs.get('project_id', None)
+    location = kwargs.get('location', None)
+    execution_id = kwargs.get('execution_id', None)
+    block_pipeline = kwargs.get('block_pipeline', None)
+    fail_pipeline = kwargs.get('fail_pipeline', None)
     labels = [
       'vertex_pipelines=notebook_executor',
-      labels,
+      kwargs.get('labels', ''),
     ]
 
     inputs_executor_api = SimpleNamespace(
       project_id=project_id,
-      input_notebook_file=input_notebook_file,
-      output_notebook_folder=output_notebook_folder,
-      execution_id=execution_id,
+      input_notebook_file=kwargs.get('input_notebook_file', None),
+      output_notebook_folder=kwargs.get('output_notebook_folder', None),
+      execution_id=kwargs.get('execution_id', None),
       location=location,
-      master_type=master_type,
-      scale_tier=scale_tier,
-      accelerator_type=accelerator_type,
-      accelerator_core_count=accelerator_core_count,
+      master_type=kwargs.get('master_type', None),
+      scale_tier=kwargs.get('scale_tier', None),
+      accelerator_type=kwargs.get('accelerator_type', None),
+      accelerator_core_count=kwargs.get('accelerator_core_count', None),
       labels=','.join([l for l in labels if l]),
-      container_image_uri=container_image_uri,
-      params_yaml_file=params_yaml_file,
-      parameters=parameters,
+      container_image_uri=kwargs.get('container_image_uri', None),
+      params_yaml_file=kwargs.get('params_yaml_file', None),
+      parameters=kwargs.get('parameters', None),
     )
 
     outputs = SimpleNamespace(
@@ -124,12 +122,12 @@ class NotebooksExecutor:
     # Executes executions().create()
     ec_parent = f'projects/{project_id}/locations/{location}'
     ec_body = NotebooksExecutor._build_body_executor(inputs_executor_api)
-    ec_request = NotebooksExecutor._build_executions_create(ec_parent, execution_id, ec_body)
+    ec_request = cls._build_executions_create(ec_parent, execution_id, ec_body)
     ec_response, err = NotebooksExecutor._execute_executions_create(ec_request)
     if err:
       return NotebooksExecutor._build_notebook_execution_outputs(error=err)
 
-    execution, err = NotebooksExecutor._wait_for_executions_create(ec_response)
+    execution, err = cls._wait_for_executions_create(ec_response)
     if err:
       return NotebooksExecutor._build_notebook_execution_outputs(error=err)
 
@@ -140,7 +138,7 @@ class NotebooksExecutor:
 
     # Final execution's parameters, after it fully ran.
     execution_name = execution.get('name', '')
-    execution, err = NotebooksExecutor._wait_for_execution_run(execution_name)
+    execution, err = cls._wait_for_execution_run(execution_name)
     if err:
       return NotebooksExecutor._build_notebook_execution_outputs(error=err)
 
@@ -208,42 +206,20 @@ class NotebooksExecutor:
   # -------------------------------------
   # API wrappers
   # -------------------------------------
-  # @staticmethod
-  # def _init_clients():
-  #   """Initializes clients for Notebooks and ML APIs.
+  @classmethod
+  def _init_clients(cls):
+    """Initializes clients for Notebooks and ML APIs.
 
-  #   TODO(mayran): Update when gapic available for Executor API.
-  #   """
-  #   http = httplib2.Http()
-  #   http_user_agent = set_user_agent(
-  #       http=http,
-  #       user_agent='google-cloud-pipeline-components')
-  #   client_notebooks = NotebooksExecutor._make_client_notebooks(http_user_agent)
-  #   client_ml = NotebooksExecutor._make_client_ml(http_user_agent)
-  #   NotebooksExecutor.client_notebooks_locations = client_notebooks.projects().locations()
-  #   NotebooksExecutor.client_ml_jobs = client_ml.projects().jobs()
-
-  @staticmethod
-  @property
-  def _make_http():
+    TODO(mayran): Update when gapic available for Executor API.
+    """
     http = httplib2.Http()
-    return set_user_agent(
+    http_user_agent = set_user_agent(
         http=http,
         user_agent='google-cloud-pipeline-components')
-
-  @staticmethod
-  @property
-  def client_notebooks_locations():
-    http = NotebooksExecutor._make_http()
-    client_notebooks = NotebooksExecutor._make_client_notebooks(http)
-    return client_notebooks.projects().locations()
-
-  @staticmethod
-  @property
-  def client_notebooks_locations():
-    http = NotebooksExecutor._make_http()
-    client_ml = NotebooksExecutor._make_client_ml(http)
-    return client_ml.projects().jobs()
+    client_notebooks = NotebooksExecutor._make_client_notebooks(http_user_agent)
+    client_ml = NotebooksExecutor._make_client_ml(http_user_agent)
+    cls.client_notebooks_locations = client_notebooks.projects().locations()
+    cls.client_ml_jobs = client_ml.projects().jobs()
 
   @staticmethod
   def _make_client_notebooks(http):
@@ -262,9 +238,9 @@ class NotebooksExecutor:
       return NotebooksExecutor._handle_error(error)
     return response, None
 
-  @staticmethod
-  def _build_executions_create(parent, execution_id, body):
-    return NotebooksExecutor.client_notebooks_locations.executions().create(
+  @classmethod
+  def _build_executions_create(cls, parent, execution_id, body):
+    return cls.client_notebooks_locations.executions().create(
         parent=parent,
         executionId=execution_id,
         body=body)
@@ -273,9 +249,9 @@ class NotebooksExecutor:
   def _execute_executions_create(request):
     return NotebooksExecutor._execute_request(request)
 
-  @staticmethod
-  def _build_operations_get(operation_name):
-    return NotebooksExecutor.client_notebooks_locations.operations().get(
+  @classmethod
+  def _build_operations_get(cls, operation_name):
+    return cls.client_notebooks_locations.operations().get(
         name=operation_name)
 
   @staticmethod
@@ -289,9 +265,9 @@ class NotebooksExecutor:
       time.sleep(5)
     return response
 
-  @staticmethod
-  def _build_executions_get(execution_name):
-    return NotebooksExecutor.client_notebooks_locations.executions().get(
+  @classmethod
+  def _build_executions_get(cls, execution_name):
+    return cls.client_notebooks_locations.executions().get(
         name=execution_name)
 
   @staticmethod
@@ -315,9 +291,9 @@ class NotebooksExecutor:
       time.sleep(30)
     return response
 
-  @staticmethod
-  def _build_jobs_get(job_name):
-    return NotebooksExecutor.client_ml_jobs.get(name=job_name)
+  @classmethod
+  def _build_jobs_get(cls, job_name):
+    return cls.client_ml_jobs.get(name=job_name)
 
   @staticmethod
   def _wait_jobs_get(request):
@@ -334,8 +310,8 @@ class NotebooksExecutor:
   # ----------------------------------
   # API calls
   # ----------------------------------
-  @staticmethod
-  def _wait_for_executions_create(operation):
+  @classmethod
+  def _wait_for_executions_create(cls, operation):
     """Runs until an operation has 'done' == True.
 
     Waits for the operation that creates an execution finishes. It is different
@@ -356,7 +332,7 @@ class NotebooksExecutor:
     if not operation_name:
       return NotebooksExecutor._handle_error('Operation is missing name.')
 
-    request = NotebooksExecutor._build_operations_get(operation_name)
+    request = cls._build_operations_get(operation_name)
     response = NotebooksExecutor._wait_operations_get(request)
 
     response_error = response.get('error', None)
@@ -366,8 +342,8 @@ class NotebooksExecutor:
     execution = response.get('response', None)
     return execution, None
 
-  @staticmethod
-  def _wait_for_execution_run(execution_name):
+  @classmethod
+  def _wait_for_execution_run(cls, execution_name):
     """Wait for a notebook execution to finish.
 
     Currently the notebooks executions().get() might returns a FAILED state but
@@ -385,7 +361,7 @@ class NotebooksExecutor:
       RuntimeError with the error message if fail_pipeline is True.
     """
     # First tries to get the Execution state, returns if API call errors.
-    eg_request = NotebooksExecutor._build_executions_get(execution_name)
+    eg_request = cls._build_executions_get(execution_name)
     eg_response = NotebooksExecutor._wait_executions_get(eg_request)
     eg_state = eg_response.get('state', None)
 
@@ -396,7 +372,7 @@ class NotebooksExecutor:
       execution_id = execution_name.split('/')[-1]
       job_name = f'projects/{project_id}/jobs/{execution_id}'
 
-      jg_request = NotebooksExecutor._build_jobs_get(job_name)
+      jg_request = cls._build_jobs_get(job_name)
       jg_response = NotebooksExecutor._wait_jobs_get(jg_request)
 
       error_message = jg_response.get('errorMessage', None)
